@@ -902,9 +902,9 @@
         </div>
       </div>
 
-      <!-- Analyze button — shared -->
-      <button class="btn-analyze" id="analyzeBtn" onclick="analyze(event)" disabled>
-        <span class="btn-label">🔍 &nbsp;Diagnose My Plant</span>
+      <!-- Analyze button - UPDATED to send image to chat.html -->
+      <button class="btn-analyze" id="analyzeBtn" onclick="sendToChat(event)" disabled>
+        <span class="btn-label">💬 &nbsp;Send to Chat & Diagnose</span>
         <span class="spinner"></span>
       </button>
 
@@ -918,19 +918,14 @@
     <img id="previewImg" src="" alt="Uploaded plant"/>
     <div class="preview-meta">
       <h4>Plant image ready</h4>
-      <p>Your photo has been loaded — click Diagnose to begin full analysis</p>
+      <p>Your photo has been loaded — click "Send to Chat" for AI diagnosis</p>
     </div>
   </div>
 </div>
 
-<!-- ═══════════ RESULTS ═══════════ -->
-<div id="results-section">
-  <div class="results-header">
-    <div class="results-badge">✦ &nbsp;Diagnosis Complete</div>
-    <h2>Here's What Our <em>Plant Doctor</em> Found</h2>
-    <p>AI-powered analysis based on your plant's unique condition</p>
-  </div>
-  <div class="results-grid" id="resultsGrid"></div>
+<!-- ═══════════ RESULTS SECTION (Removed - now using chat.html) ═══════════ -->
+<div id="results-section" style="display:none;">
+  <!-- Results moved to chat.html -->
 </div>
 
 <!-- ═══════════ TOAST ═══════════ -->
@@ -948,8 +943,6 @@
   const analyzeBtn  = document.getElementById('analyzeBtn');
   const previewSec  = document.getElementById('preview-section');
   const previewImg  = document.getElementById('previewImg');
-  const resultsSec  = document.getElementById('results-section');
-  const resultsGrid = document.getElementById('resultsGrid');
   const toast       = document.getElementById('status-toast');
 
   let uploadedFile = null, base64Data = null, mediaTypeOverride = null;
@@ -973,7 +966,7 @@
       document.getElementById('panel' + t[0].toUpperCase() + t.slice(1))?.classList.contains('active')
     );
     if (activeTab === 'type') {
-      analyzeBtn.disabled = document.getElementById('plantDesc').value.trim().length < 10;
+      analyzeBtn.disabled = document.getElementById('plantDesc').value.trim().length < 10 && !attachBase64;
     } else {
       analyzeBtn.disabled = !base64Data;
     }
@@ -1007,6 +1000,7 @@
       document.getElementById('attachName').textContent = file.name;
       document.getElementById('attachPreview').style.display = 'flex';
       showToast('📎 "' + file.name + '" attached!');
+      updateAnalyzeBtn();
     };
     reader.readAsDataURL(file);
   }
@@ -1016,6 +1010,7 @@
     attachBase64 = null; attachMime = null;
     document.getElementById('attachFile').value = '';
     document.getElementById('attachPreview').style.display = 'none';
+    updateAnalyzeBtn();
   }
   window.removeAttach = removeAttach;
 
@@ -1037,10 +1032,9 @@
       previewImg.src = e.target.result;
       previewSec.style.display = 'block';
       analyzeBtn.disabled = false;
-      resultsSec.style.display = 'none';
     };
     reader.readAsDataURL(file);
-    showToast('✅ "' + file.name + '" loaded — click Diagnose!');
+    showToast('✅ "' + file.name + '" loaded — click Send to Chat!');
   }
 
   /* ── Camera ── */
@@ -1095,17 +1089,16 @@
     previewImg.src = dataURL;
     previewSec.style.display = 'block';
     analyzeBtn.disabled = false;
-    resultsSec.style.display = 'none';
     stopCamera();
     document.getElementById('cameraIdle').innerHTML = `
       <div style="font-size:2.4rem;margin-bottom:.6rem">✅</div>
       <h3 style="font-family:'DM Serif Display',serif;color:var(--cream);margin-bottom:.3rem">Photo Captured!</h3>
-      <p>Your plant photo is ready. Click Diagnose or retake.</p>
+      <p>Your plant photo is ready. Click Send to Chat.</p>
     `;
     document.getElementById('cameraControls').innerHTML =
       `<button class="btn-cam btn-cam-start" onclick="resetCamera()">🔄 Retake</button>`;
     document.getElementById('cameraHint').textContent = '';
-    showToast('📸 Photo captured — click Diagnose My Plant!');
+    showToast('📸 Photo captured — click Send to Chat!');
   }
   window.capturePhoto = capturePhoto;
 
@@ -1131,174 +1124,44 @@
     toast._timer = setTimeout(() => toast.style.display = 'none', duration);
   }
 
-  /* ── Analyze ── */
-  async function analyze(e) {
+  /* ── Send to chat.html ── */
+  function sendToChat(e) {
     e.preventDefault(); e.stopPropagation();
 
     const isTypeTab = document.getElementById('panelType').classList.contains('active');
     const desc = isTypeTab ? document.getElementById('plantDesc').value.trim() : '';
-    if (!isTypeTab && !base64Data) return;
-    if (isTypeTab && desc.length < 10) return;
+    
+    // Check if we have valid input
+    if (!isTypeTab && !base64Data) {
+      showToast('Please upload or capture an image first');
+      return;
+    }
+    if (isTypeTab && desc.length < 10 && !attachBase64) {
+      showToast('Please describe your plant symptoms (at least 10 characters) or attach an image');
+      return;
+    }
 
     analyzeBtn.disabled = true;
     analyzeBtn.classList.add('loading');
-    resultsSec.style.display = 'none';
-    showToast('🔬 Analyzing your plant…', 60000);
+    showToast('📤 Opening chat with your plant data...');
 
-    const promptBase = `You are an expert botanist and plant pathologist. Analyze the plant information provided.
-
-Return ONLY a valid JSON object (no markdown, no extra text) with this structure:
-{
-  "species": { "name": "Common and scientific name", "confidence": "High/Medium/Low", "family": "Plant family" },
-  "health_score": 72,
-  "health_status": "Fair",
-  "diseases": [{ "name": "Disease/Issue name", "severity": "Mild/Moderate/Severe", "description": "Brief description" }],
-  "pests": [{ "name": "Pest name", "signs": "Visible signs" }],
-  "nutrient_issues": [{ "nutrient": "Nutrient name", "symptom": "Symptom description" }],
-  "treatments": ["Treatment step 1","Treatment step 2","Treatment step 3","Treatment step 4"],
-  "care_tips": ["Watering: ...","Light: ...","Fertilizer: ...","Humidity: ..."],
-  "urgency": "Low/Medium/High",
-  "summary": "2-sentence overall assessment"
-}
-
-Be specific and accurate. If the plant looks healthy, reflect that in the score and notes.`;
-
-    try {
-      let messageContent;
-      if (isTypeTab) {
-        messageContent = attachBase64
-          ? [{ type:'image', source:{type:'base64',media_type:attachMime,data:attachBase64} }, { type:'text', text:`${promptBase}\n\nUser description: ${desc}` }]
-          : [{ type:'text', text:`${promptBase}\n\nUser description of their plant: ${desc}\n\nNo image provided — base your analysis solely on the description.` }];
-      } else {
-        const mediaType = mediaTypeOverride || (uploadedFile && uploadedFile.type) || 'image/jpeg';
-        messageContent = [
-          { type:'image', source:{type:'base64',media_type:mediaType,data:base64Data} },
-          { type:'text', text:promptBase }
-        ];
-      }
-
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:1000, messages:[{role:'user',content:messageContent}] })
-      });
-
-      const data = await response.json();
-      const raw = data.content.map(b => b.text || '').join('');
-      const result = JSON.parse(raw.replace(/```json|```/g,'').trim());
-      renderResults(result);
-    } catch(err) {
-      console.error(err);
-      showToast('⚠️ Analysis failed. Please try again.', 4000);
-    } finally {
-      analyzeBtn.disabled = false;
-      analyzeBtn.classList.remove('loading');
-      clearTimeout(toast._timer);
-      toast.style.display = 'none';
+    // Store data in sessionStorage to pass to chat.html
+    if (base64Data) {
+      sessionStorage.setItem('plantImageBase64', base64Data);
+      sessionStorage.setItem('plantImageMime', mediaTypeOverride || 'image/jpeg');
     }
+    if (attachBase64) {
+      sessionStorage.setItem('plantImageBase64', attachBase64);
+      sessionStorage.setItem('plantImageMime', attachMime || 'image/jpeg');
+    }
+    if (desc) {
+      sessionStorage.setItem('plantDescription', desc);
+    }
+
+    // Open chat.html in the same tab
+    window.location.href = 'chat.html';
   }
-
-  /* ── Render Results ── */
-  function renderResults(r) {
-    const urgencyColor = { Low:'#8fd987', Medium:'#f0b842', High:'#e8784a' };
-    const uColor = urgencyColor[r.urgency] || '#8fd987';
-
-    const diseaseText = r.diseases?.length
-      ? r.diseases.map(d => `<strong>${d.name}</strong> (${d.severity}) — ${d.description}`).join('<br/>')
-      : 'No significant diseases detected. 🎉';
-    const pestText = r.pests?.length
-      ? r.pests.map(p => `<strong>${p.name}</strong>: ${p.signs}`).join('<br/>')
-      : 'No pests detected. ✅';
-    const nutrientText = r.nutrient_issues?.length
-      ? r.nutrient_issues.map(n => `<strong>${n.nutrient}</strong>: ${n.symptom}`).join('<br/>')
-      : 'Nutrient levels appear healthy. 🌱';
-
-    const treatmentItems = (r.treatments||[]).map(t => `<li>${t}</li>`).join('');
-    const careItems = (r.care_tips||[]).map(c => `<li>${c}</li>`).join('');
-
-    resultsGrid.innerHTML = `
-      <div class="result-card">
-        <span class="card-icon">🌿</span>
-        <div class="card-label">Species Identified</div>
-        <div class="card-title">${r.species?.name || 'Unknown'}</div>
-        <div class="card-body">
-          Family: ${r.species?.family || '—'}<br/>
-          Confidence: <strong>${r.species?.confidence || '—'}</strong>
-        </div>
-      </div>
-
-      <div class="result-card">
-        <span class="card-icon">💚</span>
-        <div class="card-label">Overall Health</div>
-        <div class="card-title">${r.health_status || 'Unknown'}</div>
-        <div class="health-score-wrap">
-          <div class="health-bar-bg"><div class="health-bar-fill" id="healthBar"></div></div>
-          <div class="health-score-num" id="healthNum">0%</div>
-        </div>
-        <div class="card-body" style="margin-top:.8rem">${r.summary || ''}</div>
-      </div>
-
-      <div class="result-card">
-        <span class="card-icon">⚡</span>
-        <div class="card-label">Urgency Level</div>
-        <div class="card-title" style="color:${uColor}">${r.urgency || '—'}</div>
-        <div class="card-body">
-          ${r.urgency==='High' ? '⚠️ Immediate attention required. Act within 24–48 hours.' :
-            r.urgency==='Medium' ? '🔔 Address within the next few days to prevent worsening.' :
-            '✅ Your plant can wait — no emergency treatment needed.'}
-        </div>
-      </div>
-
-      <div class="result-card">
-        <span class="card-icon">🦠</span>
-        <div class="card-label">Diseases Detected</div>
-        <div class="card-body">${diseaseText}</div>
-      </div>
-
-      <div class="result-card">
-        <span class="card-icon">🐛</span>
-        <div class="card-label">Pest Activity</div>
-        <div class="card-body">${pestText}</div>
-      </div>
-
-      <div class="result-card">
-        <span class="card-icon">🧪</span>
-        <div class="card-label">Nutrient Issues</div>
-        <div class="card-body">${nutrientText}</div>
-      </div>
-
-      <div class="result-card full">
-        <span class="card-icon">💊</span>
-        <div class="card-label">Recommended Treatments</div>
-        <div class="card-title">Step-by-Step Recovery Plan</div>
-        <ul class="treatment-list">${treatmentItems}</ul>
-      </div>
-
-      <div class="result-card full">
-        <span class="card-icon">🌞</span>
-        <div class="card-label">Ongoing Care Tips</div>
-        <div class="card-title">Keep Your Plant Thriving</div>
-        <ul class="treatment-list">${careItems}</ul>
-      </div>
-    `;
-
-    resultsSec.style.display = 'block';
-    resultsSec.scrollIntoView({ behavior:'smooth', block:'start' });
-
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      const score = r.health_score || 0;
-      document.getElementById('healthBar').style.width = score + '%';
-      const num = document.getElementById('healthNum');
-      let current = 0; const step = score / 50;
-      const timer = setInterval(() => {
-        current = Math.min(current + step, score);
-        num.textContent = Math.round(current) + '%';
-        if (current >= score) clearInterval(timer);
-      }, 20);
-    }));
-
-    showToast('✅ Diagnosis complete!', 3000);
-  }
+  window.sendToChat = sendToChat;
 </script>
 </body>
 </html>
